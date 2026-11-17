@@ -71,7 +71,7 @@ app.post("/api/chat", async (req, res) => {
 });
 
 // Start server
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     console.log("Nova AI Started Successfully!");
