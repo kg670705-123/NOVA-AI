@@ -1,71 +1,120 @@
 
 const express = require("express");
 const path = require("path");
+require("dotenv").config();
 
 const app = express();
 
-app.use(express.json());
-
-// Website files
+// Middleware
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "static")));
 
-// Local AI settings
-const OLLAMA_URL = "http://127.0.0.1:11434/api/chat";
-const MODEL = "qwen3:4b";
+// OpenAI configuration
+const OPENAI_URL = "https://api.openai.com/v1/responses";
+const MODEL = process.env.OPENAI_MODEL || "gpt-6-luna";
+
+// Home page
+app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "static", "index.html"));
+});
+
+// Health check
+app.get("/health", (req, res) => {
+    res.json({
+        status: "OK",
+        message: "Nova AI Backend is running!"
+    });
+});
 
 // Nova AI Chat API
 app.post("/api/chat", async (req, res) => {
     try {
         const message = req.body.message;
 
-        if (!message || typeof message !== "string") {
+        // Validate message
+        if (
+            typeof message !== "string" ||
+            !message.trim()
+        ) {
             return res.status(400).json({
                 error: "Please enter a question."
             });
         }
 
-        // Connect to Ollama Local AI
-        const response = await fetch(OLLAMA_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: MODEL,
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are Nova AI, a helpful assistant. Answer accurately in Hindi, English or Hinglish according to the user's language. Explain maths step by step when asked."
-                    },
-                    {
-                        role: "user",
-                        content: message
-                    }
-                ],
-                stream: false
-            })
-        });
+        // Check API key
+        const apiKey = process.env.OPENAI_API_KEY;
 
-        if (!response.ok) {
-            const errorDetails = await response.text();
-            console.error("Ollama Error:", errorDetails);
+        if (!apiKey) {
+            console.error("OPENAI_API_KEY is missing!");
 
-            return res.status(502).json({
-                error: "Local AI is not responding. Please check Ollama."
+            return res.status(500).json({
+                error: "API key is missing. Check Render Environment Variables."
             });
         }
 
+        // Send request to OpenAI
+        const response = await fetch(OPENAI_URL, {
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`
+            },
+
+            body: JSON.stringify({
+                model: MODEL,
+
+                instructions:
+                    "You are Nova AI, a helpful study and productivity assistant. Answer user questions clearly. You can communicate in Hindi, English and Hinglish.",
+
+                input: message,
+
+                max_output_tokens: 1000
+            })
+        });
+
+        // Read response
         const data = await response.json();
 
-        res.json({
-            reply: data.message?.content || "No answer received."
+        // Handle OpenAI errors
+        if (!response.ok) {
+            console.error("OpenAI Error:", data);
+
+            return res.status(response.status).json({
+                error:
+                    data.error?.message ||
+                    "OpenAI request failed."
+            });
+        }
+
+        // Extract AI answer
+        const answer = (data.output || [])
+            .flatMap(item => item.content || [])
+            .filter(item => item.type === "output_text")
+            .map(item => item.text)
+            .join("\n");
+
+        if (!answer) {
+            console.error("Empty AI response:", data);
+
+            return res.status(502).json({
+                error: "Nova AI received an empty response."
+            });
+        }
+
+        console.log("Nova AI answered successfully.");
+
+        return res.json({
+            success: true,
+            reply: answer,
+            answer: answer
         });
 
     } catch (error) {
-        console.error("Nova AI Error:", error.message);
+        console.error("Nova AI Server Error:", error);
 
-        res.status(500).json({
-            error: "Nova AI could not generate an answer."
+        return res.status(500).json({
+            error: "Something went wrong. Please try again."
         });
     }
 });
@@ -73,8 +122,10 @@ app.post("/api/chat", async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
+    console.log("================================");
     console.log("Nova AI Started Successfully!");
-    console.log("Local AI: Ollama Qwen3 4B");
-    console.log("Website: http://localhost:" + PORT);
+    console.log("AI Model:", MODEL);
+    console.log("Port:", PORT);
+    console.log("================================");
 });
